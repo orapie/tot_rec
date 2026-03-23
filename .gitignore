@@ -1,0 +1,81 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+
+# Environment & secrets (never commit)
+.env
+.env.*
+!.env.example
+*.pem
+secrets/
+
+# IDEs & editors
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs & local data
+*.log
+logs/
+data/
+*.sqlite3
+*.db
+
+# Model weights & large artifacts (adjust if you version small configs only)
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.gguf
+checkpoints/
+models/
+
+# LangChain / local vector stores (if used)
+.chroma/
+*.faiss
