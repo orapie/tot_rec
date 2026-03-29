@@ -1,16 +1,35 @@
 import asyncio
 import json
+import logging
 import uuid
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, Request, WebSocket, WebSocketDisconnect
 
 from app.auth import verify_http_api_key, verify_ws_api_key
 from app.background.navigator import run_navigation_update
 from app.foreground.stream_chat import stream_assistant_reply
 from app.state.strategy_store import StrategyStore, get_strategy_store
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="tot_rec", version="0.1.0")
+
+
+@app.get("/")
+async def root(request: Request) -> dict[str, str]:
+    u = request.url
+    base = f"{u.scheme}://{u.netloc}"
+    ws_scheme = "wss" if u.scheme == "https" else "ws"
+    ws_base = f"{ws_scheme}://{u.netloc}"
+    return {
+        "service": "tot_rec",
+        "health": f"{base}/health",
+        "ready": f"{base}/ready (若配置了 APP_API_KEY 需带头 X-API-Key)",
+        "docs": f"{base}/docs",
+        "websocket_chat": f"{ws_base}/ws/chat",
+        "usage": "浏览器打开 docs 可测 HTTP；聊天需 WebSocket 客户端连接 websocket_chat（可带 ?api_key=）",
+    }
 
 
 def http_auth(
@@ -92,21 +111,33 @@ async def chat_ws(websocket: WebSocket) -> None:
             asyncio.create_task(background())
 
             await websocket.send_json({"type": "assistant_start"})
-
             full: list[str] = []
-            async for token in stream_assistant_reply(
-                user_text=user_text,
-                strategy_instruction=strategy["instruction"],
-                history=history_before,
-            ):
-                full.append(token)
-                await websocket.send_json({"type": "token", "text": token})
+            try:
+                async for token in stream_assistant_reply(
+                    user_text=user_text,
+                    strategy_instruction=strategy["instruction"],
+                    history=history_before,
+                ):
+                    full.append(token)
+                    await websocket.send_json({"type": "token", "text": token})
+            except Exception as e:  # noqa: BLE001
+                logger.exception("stream_assistant_reply failed")
+                try:
+                    await websocket.send_json(
+                        {"type": "error", "message": f"前台生成失败: {e!s}"}
+                    )
+                except Exception:
+                    pass
+            finally:
+                try:
+                    await websocket.send_json({"type": "assistant_done"})
+                except Exception:
+                    pass
 
             assistant_body = "".join(full)
             history.append({"role": "user", "content": user_text})
-            history.append({"role": "assistant", "content": assistant_body})
-
-            await websocket.send_json({"type": "assistant_done"})
+            if assistant_body:
+                history.append({"role": "assistant", "content": assistant_body})
 
     except WebSocketDisconnect:
         return

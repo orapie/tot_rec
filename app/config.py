@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -7,10 +8,29 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_api_key: str = ""
+    # 默认 LLM：未单独配置前台/后台时，两者共用以下变量（仍是一套 API Key）
     openai_api_key: str = ""
     openai_base_url: str | None = None
     openai_model: str = "gpt-4o-mini"
+    # Kimi 等部分模型仅允许 temperature=1；OpenAI 可改为 0.7 等
+    openai_temperature: float = 1.0
+
+    # 前台 Agent（话术丝滑、严格执行策略）：留空则继承上面的 OPENAI_*
+    foreground_openai_api_key: str = ""
+    foreground_openai_base_url: str = ""
+    foreground_openai_model: str = ""
+    foreground_openai_temperature: Optional[float] = None
+
+    # 后台 Agent（推演 / ToT / 导航）：留空则继承 OPENAI_*；可换更强模型而不影响前台
+    background_openai_api_key: str = ""
+    background_openai_base_url: str = ""
+    background_openai_model: str = ""
+    background_openai_temperature: Optional[float] = None
+    background_max_tokens: int = 512
+
     redis_url: str | None = None
+    # HTTP 监听端口（可用环境变量 PORT 覆盖）；默认高位端口，减少与其它服务冲突
+    port: int = 38421
 
 
 @lru_cache
