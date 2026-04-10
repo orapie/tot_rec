@@ -14,30 +14,22 @@
 
 ---
 
-## 2. 阶段 A：只增强后台（改动最小，建议先做）
+## 2. 阶段 A：只增强后台（已实现）
 
 ### 2.1 配置
 
-在 `app/config.py` 增加可选项，例如：
-
-- `durecdial_strategies_path`：指向 `data/processed_data/strategies.json`
-- `durecdial_enable`：布尔开关，关闭时行为与现在完全一致
-
-路径建议走环境变量 / `.env`，避免写死。
+- `app/config.py`：`durecdial_enable`、`durecdial_strategies_path`
+- `.env`：`DURECDIAL_ENABLE`、`DURECDIAL_STRATEGIES_PATH`（见 `.env.example`）
 
 ### 2.2 加载与匹配
 
-新建模块（示例路径）`app/knowledge/strategies_store.py`：
-
-- 进程内加载 `strategies.json`（启动时或首次使用时）
-- 提供接口：根据当前对话上下文（或关键词）返回一段「参考阶段」文本（可先简单关键词 / 与 `situation` 重叠匹配）
+- `app/knowledge/strategies_store.py`：首次需要时加载 JSON；按「最近对话 + 当前用户句」与条目的 **situation 粗排 → 全文精排** 选一条，低于阈值则不注入。
 
 ### 2.3 接入 navigator
 
-在 `app/background/navigator.py` 中，调用 LLM **之前**将「参考阶段」写入 prompt（如 `【DuRecDial 参考阶段】...`）。
+- `app/background/navigator.py`：在调用 LLM 前拼接 `【DuRecDial 参考剧本】…` 与对话摘录。
 
-- **不修改** WebSocket 协议
-- **不修改** 策略池字段：仍只写入 `instruction`
+WebSocket 与策略池字段未变。
 
 ---
 

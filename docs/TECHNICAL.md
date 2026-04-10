@@ -1,6 +1,6 @@
 # tot_rec 技术文档
 
-本文档描述仓库内**已实现**的代码结构、运行时行为、配置项与接口约定。高层产品设计见仓库根目录 [`ARCHITECTURE.md`](../ARCHITECTURE.md)。
+本文档描述仓库内**已实现**的代码结构、运行时行为、配置项与接口约定。高层产品设计见 [`ARCHITECTURE.md`](ARCHITECTURE.md)（与本文件同目录）。
 
 ---
 
@@ -42,8 +42,8 @@ tot_rec/
 ├── main.py                 # 入口：uvicorn 启动 app.main:app
 ├── requirements.txt
 ├── .env.example
-├── ARCHITECTURE.md         # 概念架构（Mermaid）
 ├── docs/
+│   ├── ARCHITECTURE.md     # 概念架构（Mermaid）
 │   └── TECHNICAL.md        # 本文件
 ├── app/
 │   ├── main.py             # FastAPI 路由、WebSocket /health /ready
@@ -56,6 +56,8 @@ tot_rec/
 │   │   └── stream_chat.py  # 前台流式生成
 │   ├── background/
 │   │   └── navigator.py    # 后台写策略
+│   ├── knowledge/
+│   │   └── strategies_store.py  # DuRecDial strategies.json 懒加载与参考块（阶段 A）
 │   └── state/
 │       └── strategy_store.py  # 内存或 Redis
 └── scripts/
@@ -90,6 +92,13 @@ Python 建议 **3.11+**（当前开发常用 3.12）。
 | `PORT` | HTTP 监听端口，默认 `38421` |
 | `APP_API_KEY` | 访问本服务的密钥；**留空**时不校验（仅建议本机调试） |
 | `REDIS_URL` | 若设置则策略池用 Redis；否则进程内字典（单机、多 worker 不共享） |
+
+### 5.1b DuRecDial 阶段 A（可选）
+
+| 变量 | 说明 |
+|------|------|
+| `DURECDIAL_ENABLE` | `true` 时后台 `navigator` 会加载 `strategies.json`，按当前对话匹配一条参考剧本并注入 LLM 提示 |
+| `DURECDIAL_STRATEGIES_PATH` | 文件路径；留空则默认项目根下 `data/processed_data/strategies.json`（相对路径相对**项目根**解析） |
 
 ### 5.2 默认 LLM（前后台未单独覆盖时共用）
 
@@ -203,8 +212,8 @@ python scripts/ws_chat.py
 
 | 文件 | 内容 |
 |------|------|
-| [`ARCHITECTURE.md`](../ARCHITECTURE.md) | 产品级双轨、Redis、LangGraph 设想、部署拓扑 |
-| `docs/TECHNICAL.md` | 本文件：与代码一致的实现细节与运维 |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 产品级双轨、Redis、LangGraph 设想、部署拓扑 |
+| [`TECHNICAL.md`](TECHNICAL.md) | 本文件：与代码一致的实现细节与运维 |
 
 ---
 
