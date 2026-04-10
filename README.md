@@ -53,6 +53,7 @@ python scripts/ws_chat.py
 |------|------|
 | [docs/TECHNICAL.md](docs/TECHNICAL.md) | 目录结构、配置表、HTTP/WebSocket 协议、并发与策略池 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 产品级架构、技术栈选型、演进设想（LangGraph / Redis 等） |
+| [strategy/](strategy/README.md) | 阶段性策略与数据接入规划（如 DuRecDial） |
 
 ---
 
