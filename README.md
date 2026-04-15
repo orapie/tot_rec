@@ -41,7 +41,7 @@ cp .env.example .env
 **终端 WebSocket 客户端**（需服务已启动，建议另开终端）：
 
 ```bash
-./start_ws_chat.sh
+./chat.sh
 # 等价于：激活 .venv 后执行 python scripts/ws_chat.py
 ```
 
