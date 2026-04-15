@@ -43,7 +43,7 @@
 tot_rec/
 ├── main.py
 ├── start.sh                 # 激活 .venv 并启动 main.py
-├── start_ws_chat.sh         # 激活 .venv 并启动 scripts/ws_chat.py
+├── chat.sh                  # 激活 .venv 并启动 scripts/ws_chat.py
 ├── requirements.txt
 ├── .env.example
 ├── docs/
@@ -195,7 +195,7 @@ cp .env.example .env
 另开终端：
 
 ```bash
-./start_ws_chat.sh
+./chat.sh
 ```
 
 ---
