@@ -9,11 +9,17 @@ from fastapi import Depends, FastAPI, Header, Request, WebSocket, WebSocketDisco
 from app.auth import verify_http_api_key, verify_ws_api_key
 from app.background.navigator import run_navigation_update
 from app.foreground.stream_chat import stream_assistant_reply
+from app.knowledge.retriever import warmup_retriever
 from app.state.strategy_store import StrategyStore, get_strategy_store
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="tot_rec", version="0.1.0")
+
+
+@app.on_event("startup")
+async def _startup() -> None:
+    warmup_retriever()
 
 
 @app.get("/")

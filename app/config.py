@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # DuRecDial 阶段 A：convert.py 产出的 strategies.json 注入后台 navigator
     durecdial_enable: bool = False
     durecdial_strategies_path: str = ""  # 留空则使用 data/processed_data/strategies.json（相对项目根）
+    # DuRecDial 阶段 B：knowledge_rag.jsonl 检索注入（RAG）
+    durecdial_knowledge_path: str = ""  # 留空则使用 data/processed_data/knowledge_rag.jsonl（相对项目根）
+    rag_top_k: int = 3
 
     redis_url: str | None = None
     # HTTP 监听端口（可用环境变量 PORT 覆盖）；默认高位端口，减少与其它服务冲突

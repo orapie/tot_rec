@@ -42,11 +42,16 @@ def _settings() -> tuple[str, int, str]:
 
 
 _print_lock = asyncio.Lock()
+_waiting_user_input = False
 
 
 async def _println(line: str = "") -> None:
     async with _print_lock:
         print(line, flush=True)
+
+
+def _print_user_prompt() -> None:
+    print("你: ", end="", flush=True)
 
 
 def _handle_incoming_json(msg: dict) -> None:
@@ -61,10 +66,8 @@ def _handle_incoming_json(msg: dict) -> None:
     elif t == "assistant_done":
         print(flush=True)
     elif t == "strategy_updated":
-        print(
-            f"\n[后台策略 v{msg.get('version')}] {msg.get('instruction')}\n",
-            flush=True,
-        )
+        # 后台策略更新只用于服务端下一轮控制，不在终端回显。
+        return
     elif t == "error":
         print(f"\n[错误] {msg.get('message')}", flush=True)
     else:
@@ -74,6 +77,7 @@ def _handle_incoming_json(msg: dict) -> None:
 async def _recv_loop(ws) -> None:
     from websockets.exceptions import ConnectionClosed
 
+    global _waiting_user_input
     try:
         async for raw in ws:
             try:
@@ -83,6 +87,10 @@ async def _recv_loop(ws) -> None:
                 continue
             async with _print_lock:
                 _handle_incoming_json(msg)
+                # 当接收消息覆盖了输入行时，补回输入提示，保证“你:”始终先出现。
+                t = msg.get("type")
+                if _waiting_user_input and t in {"assistant_done", "error"}:
+                    _print_user_prompt()
     except ConnectionClosed as e:
         await _println(f"\n[连接已关闭] {getattr(e, 'reason', None) or e}")
 
@@ -90,14 +98,20 @@ async def _recv_loop(ws) -> None:
 async def _send_loop(ws) -> None:
     from websockets.exceptions import ConnectionClosed
 
+    global _waiting_user_input
     await _println('输入消息后回车发送；输入 "quit" 或 Ctrl+D 退出。\n')
     loop = asyncio.get_running_loop()
     while True:
         try:
-            line = await loop.run_in_executor(None, lambda: input("你: ").strip())
+            async with _print_lock:
+                _waiting_user_input = True
+                _print_user_prompt()
+            line = await loop.run_in_executor(None, lambda: input().strip())
         except (EOFError, KeyboardInterrupt):
+            _waiting_user_input = False
             await _println()
             break
+        _waiting_user_input = False
         if not line:
             continue
         if line.lower() in ("quit", "exit", "q"):
