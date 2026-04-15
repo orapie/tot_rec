@@ -7,9 +7,10 @@
 ## 特性
 
 - **FastAPI + WebSocket**：流式 token 下发，长连接对话  
-- **OpenAI 兼容 API**：支持 Kimi（Moonshot）、OpenAI、自建 vLLM 等  
+- **OpenAI 兼容 API**：支持 OpenRouter、OpenAI、自建 vLLM 等  
 - **双 LLM 配置**：可共用一套 `OPENAI_*`，或用 `FOREGROUND_*` / `BACKGROUND_*` 拆模型与端点  
 - **可选 Redis**：多实例时共享策略；不设则单机内存  
+- **DuRecDial 阶段 A+B**：后台支持 `strategies.json` 参考剧本 + `knowledge_rag.jsonl` 检索证据注入  
 - **API Key 保护服务**：`APP_API_KEY`（可选，本机调试可留空）
 
 ---
@@ -25,9 +26,11 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# 编辑 .env：至少填写 OPENAI_API_KEY、OPENAI_BASE_URL、OPENAI_MODEL（Kimi 注意 temperature=1）
+# 编辑 .env：至少填写 OPENAI_API_KEY、OPENAI_BASE_URL、OPENAI_MODEL
 
-python main.py
+# 终端 1：启动服务
+./start.sh
+# 等价于：激活 .venv 后执行 python main.py
 ```
 
 默认监听 **`http://0.0.0.0:38421`**（可用环境变量 `PORT` 修改）。
@@ -35,10 +38,11 @@ python main.py
 - 浏览器：<http://127.0.0.1:38421/docs>  
 - 健康检查：<http://127.0.0.1:38421/health>  
 
-**终端 WebSocket 客户端**（需服务已启动）：
+**终端 WebSocket 客户端**（需服务已启动，建议另开终端）：
 
 ```bash
-python scripts/ws_chat.py
+./start_ws_chat.sh
+# 等价于：激活 .venv 后执行 python scripts/ws_chat.py
 ```
 
 连接地址与鉴权见 `.env` 中的 `PORT`、`APP_API_KEY`。
@@ -52,7 +56,7 @@ python scripts/ws_chat.py
 | 文档 | 内容 |
 |------|------|
 | [docs/TECHNICAL.md](docs/TECHNICAL.md) | 目录结构、配置表、HTTP/WebSocket 协议、并发与策略池 |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 产品级架构、技术栈选型、演进设想（LangGraph / Redis 等） |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 当前逻辑架构、数据流与演进方向 |
 | [strategy/](strategy/README.md) | 阶段性策略与数据接入规划（如 DuRecDial） |
 
 ---
@@ -64,6 +68,7 @@ python scripts/ws_chat.py
 - **服务**：`PORT`、`APP_API_KEY`、`REDIS_URL`  
 - **默认 LLM**：`OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`、`OPENAI_TEMPERATURE`  
 - **可选拆分**：`FOREGROUND_OPENAI_*`、`BACKGROUND_OPENAI_*`、`BACKGROUND_MAX_TOKENS`  
+- **DuRecDial**：`DURECDIAL_ENABLE`、`DURECDIAL_STRATEGIES_PATH`、`DURECDIAL_KNOWLEDGE_PATH`、`RAG_TOP_K`
 
 ---
 

@@ -1,204 +1,138 @@
-# 异步双轨推荐系统 — 系统架构
+# tot_rec 架构文档
 
-本文档描述「前台快销执行层 + 后台 ToT 导航层」的端到端架构，以及动态导航信标、技术栈选型与数据流。
-
-**与实现对齐的说明（目录、配置、接口、并发）**：见 **[TECHNICAL.md](TECHNICAL.md)**。
+本文档描述当前系统的逻辑架构与数据流。实现细节与字段约定见 [`TECHNICAL.md`](TECHNICAL.md)。
 
 ---
 
-## 1. 设计目标
+## 1. 目标与分层
 
-| 层级 | 职责 | 目标 |
-|------|------|------|
-| **前台（执行层）** | 基于上下文 + 最新策略指令生成回复 | 低延迟、流式输出、人设一致 |
-| **后台（导航层）** | 状态评估、前瞻模拟、ToT 决策 | 不生成用户可见文本，只产出**导航指令** |
-| **连接层** | 策略共享与注入 | 前台无感知读取策略缓存，后台异步写入 |
+| 层 | 职责 | 当前状态 |
+|----|------|----------|
+| 前台执行层 | 流式生成用户可见回复 | 已实现 |
+| 后台导航层 | 并行推演并写入下一条策略 | 已实现 |
+| 知识增强层 | DuRecDial 参考剧本 + RAG 证据注入后台 | 已实现（阶段 A+B） |
+| 状态层 | 会话策略缓存（内存/Redis） | 已实现 |
 
 ---
 
-## 2. 逻辑架构（总览）
+## 2. 总览架构
 
 ```mermaid
 flowchart TB
-    subgraph Client["客户端"]
-        UI[Web / App UI]
-    end
+    U[WebSocket 客户端]
+    API[FastAPI /ws/chat]
+    FG[Foreground Agent\nstream_chat.py]
+    BG[Background Agent\nnavigator.py]
+    SS[(Strategy Store\nMemory or Redis)]
+    ST[DuRecDial strategies.json]
+    KR[DuRecDial knowledge_rag.jsonl]
+    LLMF[Foreground LLM]
+    LLMB[Background LLM]
 
-    subgraph Gateway["FastAPI 网关"]
-        WS[WebSocket 长连接]
-        REST[HTTP 健康检查 / 管理接口]
-    end
-
-    subgraph Foreground["前台：执行层"]
-        FE[Sales Expert Prompt 组装]
-        LLM_F[vLLM / TensorRT-LLM<br/>Llama-8B 等]
-        FE --> LLM_F
-    end
-
-    subgraph Background["后台：ToT 导航层"]
-        LG[LangGraph 状态机]
-        SIM[用户模拟器 / 前瞻推演]
-        EVAL[状态评估节点]
-        LG --> EVAL
-        LG --> SIM
-        LLM_B[轻量 / 中量推理模型<br/>评估与分支]
-        EVAL --> LLM_B
-        SIM --> LLM_B
-    end
-
-    subgraph State["共享状态"]
-        Redis[(Redis<br/>策略缓存池 + 会话元数据)]
-    end
-
-    UI <-->|流式 token / 策略推送| WS
-    WS --> FE
-    FE -->|读策略| Redis
-    LG -->|写策略| Redis
-    WS -->|触发后台任务| LG
+    U <--> API
+    API --> FG
+    API --> BG
+    FG --> SS
+    BG --> SS
+    BG --> ST
+    BG --> KR
+    FG --> LLMF
+    BG --> LLMB
 ```
 
 ---
 
-## 3. 三层职责划分
-
-### 3.1 前台：执行层
-
-- **输入**：`conversation_history`（截断/摘要后的上下文）、`strategy_injection`（来自 Redis 的当前导航信标）、`persona`（销售专家人设）。
-- **行为**：用户消息到达后**不等待** ToT 完成；立即用当前缓存中的策略（若存在）生成回复；可流式返回。
-- **模型**：经微调的轻量模型（如 Llama-8B），由 **vLLM** 或 **TensorRT-LLM** 提供 **Continuous Batching**，保证吞吐与延迟。
-
-### 3.2 后台：异步反思与导航层
-
-- **触发**（与前台并行）：
-  - **T1**：系统回复发出后，用户阅读/输入的间隙，后台持续或周期性刷新策略。
-  - **T2**：用户新消息到达时，与前台生成**并行**启动新一轮 ToT（评估上一步是否合适、下一步话题方向）。
-- **输出**：仅**一条简短系统指令**（自然语言或结构化 JSON），例如「当前策略：……」，写入 Redis，**不**直接拼进用户可见回复（由前台决定是否注入 Prompt）。
-
-### 3.3 动态导航信标（策略共享池）
-
-- **介质**：Redis（键值 + 可选 TTL，按 `session_id` 隔离）。
-- **语义**：「当前最优话题方向 / 约束」，供前台组装 System 或 User 侧注入块。
-- **一致性**：允许短暂滞后（前台可能先读到上一轮策略）；新策略写入后，下一轮用户或助手轮次即可生效。
-
----
-
-## 4. 数据流：单轮对话
+## 3. 单轮数据流
 
 ```mermaid
 sequenceDiagram
-    participant U as 用户
-    participant WS as WebSocket
-    participant FG as 前台执行层
-    participant R as Redis
-    participant BG as LangGraph ToT
-    participant LLM as 前台 LLM
+    participant User as 用户
+    participant WS as /ws/chat
+    participant Store as Strategy Store
+    participant FG as Foreground
+    participant BG as Background
+    participant LLMF as Foreground LLM
+    participant LLMB as Background LLM
 
-    U->>WS: 用户消息
+    User->>WS: user_message
+    WS->>Store: 读取当前策略
+    Store-->>WS: instruction/version
+
     par 前台路径
-        WS->>FG: 解析用户消息
-        FG->>R: GET strategy:{session_id}
-        R-->>FG: 当前策略
-        FG->>LLM: Prompt + 策略注入
-        LLM-->>WS: 流式 token
-        WS-->>U: 流式展示
+        WS->>FG: strategy + history + user_text
+        FG->>LLMF: chat.completions(stream=True)
+        LLMF-->>WS: token*
+        WS-->>User: assistant_start/token/assistant_done
     and 后台路径
-        WS->>BG: asyncio.create_task(run_tot)
-        BG->>BG: 评估状态 + 前瞻 1-2 步
-        BG->>R: SET strategy:{session_id}
-        R-->>BG: OK
-        opt 可选
-            BG-->>WS: 推送 strategy_updated（事件）
-            WS-->>U: 可选 UI 提示（非用户文本）
-        end
+        WS->>BG: create_task(run_navigation_update)
+        BG->>BG: 注入参考剧本 + 检索证据
+        BG->>LLMB: chat.completions
+        LLMB-->>BG: 下一条策略
+        BG->>Store: 写入新策略
+        BG-->>WS: strategy_updated
     end
 ```
 
----
+关键特性：
 
-## 5. Redis 键空间设计（建议）
-
-| 键模式 | 类型 | 内容 |
-|--------|------|------|
-| `strategy:{session_id}` | String 或 Hash | `instruction`（导航指令）、`version`（单调递增）、`ttl_hint` 等 |
-| `session:{session_id}:meta` | Hash | `user_id`、`created_at`、`last_turn` |
-| `lock:{session_id}:tot` | String | 可选，后台 ToT 互斥，避免重复重入 |
-
-**策略 JSON 示例（Hash 字段）**：`instruction`、`confidence`、`branch_tags[]`、`updated_at`。
+- 前后台并行执行，前台优先保证响应速度。
+- 策略天然“滞后一回合”，这是设计选择而非异常。
+- `strategy_updated` 事件由服务端发送，终端客户端可选择展示或忽略。
 
 ---
 
-## 6. LangGraph：后台 ToT 编排（概念图）
+## 4. 知识增强架构（DuRecDial A+B）
 
-```mermaid
-flowchart LR
-    START([用户消息到达 / 系统回复后]) --> S1[节点：对话状态摘要]
-    S1 --> S2[节点：意图与接受度评估]
-    S2 --> S3[节点：ToT 分支展开]
-    S3 --> S4[节点：用户模拟器前瞻 1-2 步]
-    S4 --> S5[节点：选择最优分支]
-    S5 --> S6[节点：生成导航指令]
-    S6 --> REDIS[(写入 Redis)]
-    S6 --> END([结束本轮 ToT])
-```
+### 4.1 阶段 A：参考剧本
 
-- **状态**：LangGraph 的 `graph state` 中保留 `messages`、`eval_scores`、`candidate_branches`、`chosen_instruction`。
-- **与用户模拟器**：在 `S3-S4` 用轻量模型快速生成若干「假设用户回应」，再打分，避免全量对话生成。
+- 数据：`strategies.json`
+- 模块：`app/knowledge/strategies_store.py`
+- 作用：按当前会话匹配一条最相关剧本，生成 `【DuRecDial 参考剧本】`。
 
----
+### 4.2 阶段 B：RAG 检索
 
-## 7. FastAPI 与并发模型
+- 数据：`knowledge_rag.jsonl`
+- 模块：`app/knowledge/retriever.py`
+- 算法：内存索引 + BM25 排序 + top-k 截断
+- 作用：生成 `【DuRecDial 检索证据】` 注入后台导航 prompt。
 
-- **WebSocket**：每个会话一个连接；`receive` 用户消息与 `send` 流式 token 分离协程或使用队列。
-- **前台**：`async` 调用 vLLM 的 OpenAI 兼容接口（流式 `chat.completions`）。
-- **后台**：`asyncio.create_task` 或 **任务队列**（如后续扩展 Celery/Arq）挂载 ToT；同一 `session_id` 可串行或带版本号合并，避免乱序覆盖。
+### 4.3 启动预热
+
+- `app/main.py` 在 startup 事件中调用 `warmup_retriever()`
+- 目的：降低首次请求读取大文件的延迟抖动。
 
 ---
 
-## 8. 技术栈映射
+## 5. 状态与一致性
 
-| 维度 | 选型 | 在本架构中的角色 |
-|------|------|------------------|
-| 推理引擎 | vLLM / TensorRT-LLM | 前台主模型高吞吐、流式；可选后台小模型 |
-| 后端框架 | FastAPI | WebSocket + asyncio + 依赖注入 |
-| 状态存储 | Redis | 策略缓存池、会话元数据、可选分布式锁 |
-| 后台编排 | LangGraph | ToT 循环、反思、状态机 |
-| 通信协议 | WebSocket | 长连接、流式 token、可选服务端推送策略更新事件 |
+- 会话键：`strategy:{session_id}`
+- 内容：`instruction`、`version`、`updated_at`
+- 存储：
+  - 无 `REDIS_URL`：进程内内存（适合单机开发）
+  - 有 `REDIS_URL`：Redis（适合多实例）
 
----
+一致性语义：
 
-## 9. 部署拓扑（建议）
-
-```mermaid
-flowchart LR
-    LB[负载均衡] --> API1[FastAPI 实例 1]
-    LB --> API2[FastAPI 实例]
-    API1 --> Redis
-    API2 --> Redis
-    API1 --> VLLM[vLLM 服务]
-    API2 --> VLLM
-```
-
-- **有状态会话**：WebSocket 需 sticky session，或会话状态只放 Redis、任意 API 节点可恢复。
-- **vLLM**：独立进程，与 API 进程分离，便于横向扩展。
+- 前台读取“当前策略”，后台异步写“下一策略”。
+- 允许短暂旧值读取，但策略会在后续轮次收敛。
 
 ---
 
-## 10. 与本仓库的对应关系（后续实现）
+## 6. 组件边界
 
-| 目录/文件（建议） | 说明 |
-|-------------------|------|
-| `main.py` | FastAPI 入口、WebSocket 路由 |
-| `foreground/` | Prompt 组装、前台 LLM 客户端 |
-| `background/` | LangGraph graph 定义、ToT 节点 |
-| `state/redis_store.py` | Redis 策略读写 |
-| `schemas/` | 策略指令、会话事件的 Pydantic 模型 |
+- `app/main.py`：协议层（HTTP/WS）、并发编排、错误处理
+- `app/foreground/stream_chat.py`：前台对话生成
+- `app/background/navigator.py`：后台策略生成
+- `app/knowledge/*`：知识加载、匹配、检索
+- `app/state/strategy_store.py`：会话策略持久化
+
+这个边界支持后续替换内部实现（例如把 BM25 换向量检索、把后台单次补全升级为多节点流程），而不改 WebSocket 契约。
 
 ---
 
-## 11. 小结
+## 7. 演进方向（可选）
 
-- **前台**只负责「快」与「像人」，**策略**来自 Redis，不依赖 ToT 当轮完成。
-- **后台**负责「慢思考」与「导航」，产出**短指令**写入 Redis，必要时通过 WebSocket 推送**事件**（非聊天内容）。
-- **动态导航信标**是前后台契约：版本号 + 会话隔离，便于演进与调试。
-
-如需下一步，可在本仓库中实现最小闭环：单会话 WebSocket + Redis 策略读写 + 模拟 ToT 写指令 + 前台注入 Prompt。
+- 前台也注入 RAG 证据（当前仅后台注入）
+- 增加结构化可观测日志（session_id、模型、耗时、token）
+- 引入更强后台编排（任务队列或图编排）以支撑复杂 ToT
+- 为检索层增加向量索引与混合召回
