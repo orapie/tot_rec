@@ -57,18 +57,29 @@ WebSocket 与策略池字段未变。
 
 ---
 
-## 4. 阶段 C：前台 few-shot（`chat_samples.jsonl`）
+## 4. 阶段 C：前台 few-shot（`chat_samples.jsonl`）✅ 已实现
 
-### 4.1 加载
+### 4.1 配置
 
-新建 `app/knowledge/chat_samples_store.py`：
+- `app/config.py`：`few_shot_enable`、`chat_samples_path`、`few_shot_max_samples`
+- `.env`：`FEW_SHOT_ENABLE=true`、`CHAT_SAMPLES_PATH`（可选）、`FEW_SHOT_MAX_SAMPLES`（默认 2）
 
-- 加载 `chat_samples.jsonl`
-- 按 `strategy_step` 或关键词取 1～3 条示例
+### 4.2 加载
 
-### 4.2 接入前台
+`app/knowledge/chat_samples_store.py`：
 
-在 `app/foreground/stream_chat.py` 的 `messages` 中，在系统提示之后插入少量 `user` / `assistant` 对话对作为 few-shot，控制总长度。
+- 懒加载 `chat_samples.jsonl`
+- 匹配优先级：`strategy_step` 标签关键词（权重 0.6）→ 用户输入字符 Jaccard（权重 0.4）
+- 取 top-k 条（超 3 条自动截断），低于最低阈值时不注入
+- 日志中输出命中的 `uid`，便于追踪
+
+### 4.3 接入前台
+
+`app/foreground/stream_chat.py`：
+
+- 系统提示之后、历史对话之前插入 few-shot `user/assistant` 对
+- 每条文本超 120 字符自动截断（去除 DuRecDial 分词空格），控制 token 消耗
+- `few_shot_enable=false` 时完全跳过，保持原有行为
 
 ---
 

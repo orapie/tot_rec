@@ -90,9 +90,11 @@ def _item_blob(item: dict[str, Any]) -> str:
     return f"{sit} {step_text}"
 
 
-def _pick_best_item(ctx: str, rows: list[dict[str, Any]], situation_top_n: int = 64) -> dict[str, Any] | None:
+def _pick_best_item(
+    ctx: str, rows: list[dict[str, Any]], situation_top_n: int = 64
+) -> tuple[dict[str, Any] | None, float]:
     if not ctx.strip() or not rows:
-        return None
+        return None, 0.0
     # 先按 situation 粗排，再对全文精排，避免每条都拼接长 steps
     scored_sit: list[tuple[float, dict[str, Any]]] = []
     for item in rows:
@@ -110,8 +112,8 @@ def _pick_best_item(ctx: str, rows: list[dict[str, Any]], situation_top_n: int =
             best_score = score
             best = item
     if best is None or best_score < 0.02:
-        return None
-    return best
+        return None, best_score
+    return best, best_score
 
 
 def _format_reference(item: dict[str, Any], max_steps: int = 8) -> str:
@@ -127,25 +129,37 @@ def _format_reference(item: dict[str, Any], max_steps: int = 8) -> str:
     return "\n".join(lines)
 
 
+def pick_reference_for_navigator(
+    history: list[dict[str, str]],
+    user_text: str,
+) -> tuple[str, str | None]:
+    """返回 (参考文本, reference_uid)。未命中时为 ("", None)。"""
+    s = get_settings()
+    if not s.durecdial_enable:
+        return "", None
+
+    rows = _ensure_loaded()
+    if not rows:
+        return "", None
+
+    ctx = _build_context_blob(history, user_text)
+    item, score = _pick_best_item(ctx, rows)
+    if item is None:
+        logger.debug("DuRecDial reference miss")
+        return "", None
+
+    ref_uid = str(item.get("uid", "") or "").strip() or None
+    logger.info("DuRecDial reference hit: uid=%s score=%.4f", ref_uid or "N/A", score)
+    return _format_reference(item), ref_uid
+
+
 def build_reference_for_navigator(
     history: list[dict[str, str]],
     user_text: str,
 ) -> str:
-    """若启用 DuRecDial 且命中参考条目，返回注入 navigator 的文本；否则空串。"""
-    s = get_settings()
-    if not s.durecdial_enable:
-        return ""
-
-    rows = _ensure_loaded()
-    if not rows:
-        return ""
-
-    ctx = _build_context_blob(history, user_text)
-    item = _pick_best_item(ctx, rows)
-    if item is None:
-        return ""
-
-    return _format_reference(item)
+    """兼容旧调用：仅返回参考文本。"""
+    ref, _ = pick_reference_for_navigator(history, user_text)
+    return ref
 
 
 def reload_strategies_cache_for_tests() -> None:

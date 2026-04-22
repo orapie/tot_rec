@@ -43,6 +43,11 @@ def _settings() -> tuple[str, int, str]:
 
 _print_lock = asyncio.Lock()
 _waiting_user_input = False
+# 前台是否处于流式输出中（用于和后台输出做视觉分隔）
+_assistant_streaming = False
+# 一轮发送后等待前台 assistant_done，再展示下一次“你:”
+_assistant_done_event = asyncio.Event()
+_assistant_done_event.set()
 
 
 async def _println(line: str = "") -> None:
@@ -55,20 +60,35 @@ def _print_user_prompt() -> None:
 
 
 def _handle_incoming_json(msg: dict) -> None:
+    global _assistant_streaming
     t = msg.get("type")
     if t == "session":
         print(f"[session] id={msg.get('session_id')}", flush=True)
     elif t == "assistant_start":
+        _assistant_streaming = True
         print("\n助手: ", end="", flush=True)
     elif t == "token":
         piece = msg.get("text") or ""
         print(piece, end="", flush=True)
     elif t == "assistant_done":
+        _assistant_streaming = False
         print(flush=True)
     elif t == "strategy_updated":
-        # 后台策略更新只用于服务端下一轮控制，不在终端回显。
-        return
+        ver = msg.get("version")
+        instruction = (msg.get("instruction") or "").strip()
+        ref_uid = (msg.get("reference_uid") or "").strip()
+        if _assistant_streaming:
+            # 后台消息若在前台流式期间到达，先换行避免粘连在同一行。
+            print(flush=True)
+        if ver is not None:
+            title = f"--- 后台Agent v{ver} ---"
+        else:
+            title = "--- 后台Agent ---"
+        if ref_uid:
+            title += f" [ref_uid={ref_uid}]"
+        print(f"\n{title}\n{instruction}\n" + "-" * len(title), flush=True)
     elif t == "error":
+        _assistant_streaming = False
         print(f"\n[错误] {msg.get('message')}", flush=True)
     else:
         print(f"\n[{t}] {msg}", flush=True)
@@ -89,9 +109,13 @@ async def _recv_loop(ws) -> None:
                 _handle_incoming_json(msg)
                 # 当接收消息覆盖了输入行时，补回输入提示，保证“你:”始终先出现。
                 t = msg.get("type")
-                if _waiting_user_input and t in {"assistant_done", "error"}:
+                if t in {"assistant_done", "error"}:
+                    _assistant_done_event.set()
+                # 仅在错误场景重绘输入提示，避免后台异步消息导致重复出现“你:”
+                if _waiting_user_input and t in {"error"}:
                     _print_user_prompt()
     except ConnectionClosed as e:
+        _assistant_done_event.set()
         await _println(f"\n[连接已关闭] {getattr(e, 'reason', None) or e}")
 
 
@@ -117,7 +141,10 @@ async def _send_loop(ws) -> None:
         if line.lower() in ("quit", "exit", "q"):
             break
         try:
+            _assistant_done_event.clear()
             await ws.send(json.dumps({"type": "user_message", "text": line}, ensure_ascii=False))
+            # 等当前轮回复结束后再显示下一次输入提示，避免中间多出“你:”
+            await _assistant_done_event.wait()
         except ConnectionClosed as e:
             await _println(f"\n[无法发送：连接已断开] {getattr(e, 'reason', None) or e}")
             break

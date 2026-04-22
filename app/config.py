@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     durecdial_knowledge_path: str = ""  # 留空则使用 data/processed_data/knowledge_rag.jsonl（相对项目根）
     rag_top_k: int = 3
 
+    # DuRecDial 阶段 C：chat_samples.jsonl 前台 few-shot 注入
+    few_shot_enable: bool = False
+    chat_samples_path: str = ""   # 留空则使用 data/processed_data/chat_samples.jsonl（相对项目根）
+    few_shot_max_samples: int = 2  # 注入条数上限（建议 1-3，过多会超 token）
+
     redis_url: str | None = None
     # HTTP 监听端口（可用环境变量 PORT 覆盖）；默认高位端口，减少与其它服务冲突
     port: int = 38421

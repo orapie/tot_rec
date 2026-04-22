@@ -1,6 +1,6 @@
 from app.config import get_settings
 from app.knowledge.retriever import build_knowledge_for_navigator
-from app.knowledge.strategies_store import build_reference_for_navigator
+from app.knowledge.strategies_store import pick_reference_for_navigator
 from app.llm.resolve import get_background_runtime
 from app.state.strategy_store import StrategyStore
 
@@ -31,7 +31,7 @@ async def run_navigation_update(
     compact.append(f"user: {user_text}")
     blob = "\n".join(compact)
 
-    ref = build_reference_for_navigator(history, user_text)
+    ref, ref_uid = pick_reference_for_navigator(history, user_text)
     rag = build_knowledge_for_navigator(history, user_text)
     sections: list[str] = []
     if ref:
@@ -55,4 +55,7 @@ async def run_navigation_update(
         max_tokens=s.background_max_tokens,
     )
     text = (resp.choices[0].message.content or "").strip()
-    return await store.set_instruction(session_id, text)
+    row = await store.set_instruction(session_id, text)
+    if ref_uid:
+        row["reference_uid"] = ref_uid
+    return row

@@ -1,7 +1,10 @@
+import logging
 from collections.abc import AsyncIterator
 
+from app.knowledge.chat_samples_store import build_few_shot_messages
 from app.llm.resolve import get_foreground_runtime
 
+logger = logging.getLogger(__name__)
 
 SALES_SYSTEM = """你是热情、专业的影视推荐销售顾问。回复要短、口语化，像真人聊天。
 不要一次罗列过多片名；优先用问句引导用户说出偏好。
@@ -26,6 +29,13 @@ async def stream_assistant_reply(
             "content": f"【当前导航策略】{strategy_instruction}\n请严格按此策略组织本轮话术。",
         },
     ]
+
+    # 阶段 C：注入 few-shot 对话示例（few_shot_enable=true 时生效）
+    few_shot = build_few_shot_messages(user_text, strategy_instruction)
+    if few_shot:
+        logger.info("Injecting %d few-shot messages into foreground prompt", len(few_shot))
+        messages.extend(few_shot)
+
     for m in history[-20:]:
         messages.append({"role": m["role"], "content": m["content"]})
     messages.append({"role": "user", "content": user_text})

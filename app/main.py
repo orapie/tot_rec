@@ -107,23 +107,33 @@ async def chat_ws(websocket: WebSocket) -> None:
                             "type": "strategy_updated",
                             "instruction": row["instruction"],
                             "version": row["version"],
+                            "reference_uid": row.get("reference_uid"),
                         }
                     )
                 except Exception as e:  # noqa: BLE001
                     await websocket.send_json(
                         {"type": "error", "message": f"navigator failed: {e!s}"}
                     )
-
-            asyncio.create_task(background())
-
             await websocket.send_json({"type": "assistant_start"})
             full: list[str] = []
+            background_started = False
+
+            def start_background_once() -> None:
+                nonlocal background_started
+                if background_started:
+                    return
+                background_started = True
+                asyncio.create_task(background())
+
             try:
                 async for token in stream_assistant_reply(
                     user_text=user_text,
                     strategy_instruction=strategy["instruction"],
                     history=history_before,
                 ):
+                    # 前台优先：首个 token 发出后再并行启动后台，降低同源模型并发抢占带来的首字延迟。
+                    if not background_started:
+                        start_background_once()
                     full.append(token)
                     await websocket.send_json({"type": "token", "text": token})
             except Exception as e:  # noqa: BLE001
@@ -135,6 +145,9 @@ async def chat_ws(websocket: WebSocket) -> None:
                 except Exception:
                     pass
             finally:
+                # 即使前台异常，也保证后台仍会异步更新策略池（用于下一轮）。
+                if not background_started:
+                    start_background_once()
                 try:
                     await websocket.send_json({"type": "assistant_done"})
                 except Exception:
